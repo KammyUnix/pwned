@@ -1,0 +1,34 @@
+name: Pwned
+
+options:
+  bundleIdPrefix: by.thekammy
+  deploymentTarget:
+    iOS: "26.3"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.3"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: Pwned
+
+targets:
+  Pwned:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Components
+      - path: Core
+      - path: Features
+      - path: Models
+      - path: Persistence
+      - path: Resources
+      - path: Services
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: by.thekammy.pwned
+        PRODUCT_NAME: Pwned
+        CODE_SIGNING_ALLOWED: NO
