@@ -81,13 +81,18 @@ extension ModelContext {
 
     /// Deletes everything beyond the newest `limit` items.
     private func trim<T: PersistentModel>(
-        _ type: T.Type,
-        sortedBy keyPath: KeyPath<T, Date>,
-        keeping limit: Int
-    ) {
-        var descriptor = FetchDescriptor<T>(sortBy: [SortDescriptor(keyPath, order: .reverse)])
-        descriptor.fetchOffset = limit
-        guard let overflow = try? fetch(descriptor) else { return }
-        for item in overflow { delete(item) }
+    _ type: T.Type,
+    sortedBy keyPath: KeyPath<T, Date>,
+    keeping limit: Int
+) {
+    let descriptor = FetchDescriptor<T>()
+    guard let items = try? fetch(descriptor) else { return }
+
+    let overflow = items
+        .sorted { $0[keyPath: keyPath] > $1[keyPath: keyPath] }
+        .dropFirst(limit)
+
+    for item in overflow {
+        delete(item)
     }
 }
