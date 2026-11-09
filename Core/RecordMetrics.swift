@@ -7,6 +7,21 @@ extension Date {
     }
 }
 
+extension DataSourceState {
+    /// One-line, user-facing description of where the data came from.
+    var summary: String {
+        switch self {
+        case .sample:
+            return "Sample data. No live source has been queried."
+        case .cached(let lastUpdated):
+            guard let lastUpdated else { return "Saved on this device." }
+            return "Saved on this device. Last updated \(lastUpdated.formatted(date: .abbreviated, time: .shortened))."
+        case .live(let lastUpdated):
+            return "Last updated \(lastUpdated.formatted(date: .abbreviated, time: .shortened))."
+        }
+    }
+}
+
 extension Collection {
     /// Singular/plural helper: `3.countLabel("note")` style callers use
     /// `items.countLabel(singular:plural:)`.

@@ -13,6 +13,8 @@ struct DiscoverView: View {
     @Query private var repositoryBookmarks: [RepositoryBookmark]
     @Query(sort: \ViewedItem.viewedAt, order: .reverse) private var viewedItems: [ViewedItem]
 
+    @State private var showsSettings = false
+
     private let previewCount = 3
 
     var body: some View {
@@ -21,7 +23,15 @@ struct DiscoverView: View {
         NavigationStack(path: $router.discoverPath) {
             List {
                 if store.isShowingSampleData {
-                    Section { SampleDataNotice() }
+                    Section {
+                        if store.isShowingSampleVulnerabilities {
+                            SampleDataNotice()
+                        } else {
+                            SampleDataNotice(
+                                message: "Apple advisories, announcements and repositories below are built-in samples, not real intelligence. Vulnerabilities come from NVD."
+                            )
+                        }
+                    }
                 }
 
                 activitySection
@@ -36,6 +46,19 @@ struct DiscoverView: View {
                 statusSection
             }
             .navigationTitle("Discover")
+            .refreshable { await store.refresh() }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showsSettings = true
+                    } label: {
+                        Label("Data & Cache", systemImage: "gearshape")
+                    }
+                }
+            }
+            .sheet(isPresented: $showsSettings) {
+                DataSettingsView()
+            }
             .appRouteDestinations()
         }
     }
@@ -77,6 +100,27 @@ struct DiscoverView: View {
 
     private var vulnerabilitiesSection: some View {
         Section("Recently Published Vulnerabilities") {
+            switch store.refreshPhase {
+            case .idle:
+                EmptyView()
+            case .loading:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading from NVD…")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if store.recentVulnerabilities.isEmpty {
+                Text("No vulnerabilities loaded yet.")
+                    .foregroundStyle(.secondary)
+            }
+
             ForEach(store.recentVulnerabilities.prefix(previewCount)) { vulnerability in
                 NavigationLink(value: AppRoute.vulnerability(vulnerability.id)) {
                     VulnerabilityRow(vulnerability: vulnerability)
@@ -174,11 +218,11 @@ struct DiscoverView: View {
     private var statusSection: some View {
         Section {
         } footer: {
-            switch store.state {
-            case .sample:
-                Text("Showing sample data. No live source has been queried.")
-            case .live(let lastUpdated):
-                Text("Last updated \(lastUpdated.formatted(date: .abbreviated, time: .shortened)).")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Vulnerabilities: \(store.vulnerabilityState.summary)")
+                if store.isShowingSampleData {
+                    Text("Apple advisories, announcements and repositories: sample data.")
+                }
             }
         }
     }

@@ -41,5 +41,6 @@ struct ContentView: View {
     ContentView()
         .environment(AppRouter())
         .environment(IntelligenceStore())
+        .environment(ConnectivityMonitor())
         .modelContainer(PersistenceController.makeInMemoryContainer())
 }
