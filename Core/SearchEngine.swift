@@ -93,7 +93,7 @@ enum SearchEngine {
             id: "cve:\(id)",
             category: .vulnerability,
             title: id,
-            subtitle: "Not in the local database. Live NVD lookup is not available yet.",
+            subtitle: "Not stored on this device. Opens a live lookup on NVD.",
             systemImage: "exclamationmark.shield",
             target: .vulnerability(id),
             isSample: false

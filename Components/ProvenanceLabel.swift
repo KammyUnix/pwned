@@ -14,12 +14,14 @@ struct ProvenanceLabel: View {
 
 /// Inline notice shown above content that comes from built-in sample data.
 struct SampleDataNotice: View {
+    var message = "These records are built-in development samples, not real intelligence. Live sources are added in later phases."
+
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sample Data")
                     .font(.subheadline.weight(.semibold))
-                Text("These records are built-in development samples, not real intelligence. Live sources are added in later phases.")
+                Text(message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

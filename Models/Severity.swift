@@ -27,6 +27,21 @@ enum Severity: Int, Codable, CaseIterable, Comparable, Identifiable, Sendable {
         }
     }
 
+    /// CVSS v2 has no Critical band: Low 0.0–3.9, Medium 4.0–6.9, High 7.0–10.0.
+    init(cvssV2BaseScore score: Double) {
+        switch score {
+        case ..<4.0: self = .low
+        case ..<7.0: self = .medium
+        default: self = .high
+        }
+    }
+
+    /// Severities offered by the filter menu, most severe first.
+    static let filterOptions: [Severity] = [.critical, .high, .medium, .low, .unknown]
+
+    /// Filter bucket for this severity. A score of exactly 0.0 is grouped with unrated.
+    var filterBucket: Severity { self == .none ? .unknown : self }
+
     var title: String {
         switch self {
         case .unknown: "Unrated"
@@ -45,6 +60,17 @@ struct CVSSScore: Codable, Hashable, Sendable {
     var baseScore: Double
     /// Vector string such as `CVSS:3.1/AV:N/AC:L/...`, when available.
     var vector: String?
+    /// Who supplied the score, for example `nvd@nist.gov` or a CNA address.
+    var source: String? = nil
+    /// True when NVD labels the score "Primary" (its own analysis), false for
+    /// "Secondary" (a CNA or other source), nil when unknown.
+    var isPrimary: Bool? = nil
 
-    var severity: Severity { Severity(cvssBaseScore: baseScore) }
+    var severity: Severity {
+        version.hasPrefix("2")
+            ? Severity(cvssV2BaseScore: baseScore)
+            : Severity(cvssBaseScore: baseScore)
+    }
+
+    var label: String { "CVSS \(version)" }
 }
