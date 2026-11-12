@@ -53,8 +53,9 @@ enum NumberConverter {
 
     /// The printable ASCII character with this code, if there is one.
     static func printableASCII(_ value: UInt64) -> Character? {
-        guard (0x20...0x7E).contains(value), let scalar = Unicode.Scalar(UInt8(value)) else { return nil }
-        return Character(scalar)
+        guard (0x20...0x7E).contains(value) else { return nil }
+        // Unicode.Scalar(UInt8) can't fail, and the range check keeps this to ASCII.
+        return Character(Unicode.Scalar(UInt8(value)))
     }
 
     /// The fewest bits that hold `value` (zero takes one).
