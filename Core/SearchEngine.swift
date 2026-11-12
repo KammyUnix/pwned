@@ -2,17 +2,26 @@ import Foundation
 
 /// Builds categorized universal-search results from local data only.
 ///
-/// Phase 1 searches the vulnerability store, the Apple Research catalog and the
-/// user's notes. Live sources (NVD, GitHub) are added in later phases.
+/// Searches the Apple-focused feed, the research catalog, the user's notes and
+/// the links those notes make. A CVE identifier is looked up among *every*
+/// record on the device, because someone who types a specific ID wants that
+/// record whether or not it is Apple's; free-text matches come from the Apple
+/// feed only, so an unrelated record never shows up under an ordinary search.
 @MainActor
 enum SearchEngine {
     private static let maxVulnerabilityMatches = 5
     private static let maxNoteMatches = 5
 
+    /// - Parameters:
+    ///   - feed: Apple-focused records, searched by text.
+    ///   - known: Every record on the device, used to resolve an exact CVE ID.
+    ///   - references: Note links, so a note can be found by what it links to.
     static func results(
         for rawQuery: String,
-        vulnerabilities: [Vulnerability],
-        notes: [ResearchNote]
+        feed: [Vulnerability],
+        known: [Vulnerability],
+        notes: [ResearchNote],
+        references: [NoteReference] = []
     ) -> [SearchResult] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
@@ -21,17 +30,16 @@ enum SearchEngine {
 
         switch SearchClassifier.classify(query) {
         case .cve(let id):
-            results.append(cveResult(id: id, vulnerabilities: vulnerabilities))
+            results.append(cveResult(id: id, known: known))
 
         case .gitHubRepository(let reference):
             results.append(SearchResult(
                 id: "repo:\(reference.fullName.lowercased())",
                 category: .repository,
                 title: reference.fullName,
-                subtitle: "GitHub repository. Parsed from the URL; not yet fetched.",
+                subtitle: "GitHub repository. Opens a page that fetches its details from GitHub.",
                 systemImage: "shippingbox",
-                target: .repository(reference),
-                isSample: false
+                target: .repository(reference)
             ))
 
         case .applePlatformVersion(let platform, let version):
@@ -39,10 +47,9 @@ enum SearchEngine {
                 id: "version:\(platform.rawValue.lowercased())-\(version)",
                 category: .appleVersion,
                 title: "\(platform.title) \(version)",
-                subtitle: "Opens the \(platform.title) research page. Version-specific release data is not loaded yet.",
+                subtitle: "Opens the \(platform.title) research page.",
                 systemImage: platform.systemImage,
-                target: .researchTopic(ResearchCatalog.slug(for: platform.title)),
-                isSample: false
+                target: .researchTopic(ResearchCatalog.slug(for: platform.title))
             ))
 
         case .text:
@@ -50,18 +57,8 @@ enum SearchEngine {
         }
 
         results += topicResults(for: query)
-        results += vulnerabilityTextResults(for: query, in: vulnerabilities)
-        results += noteResults(for: query, in: notes)
-
-        results.append(SearchResult(
-            id: "search:vulnerabilities",
-            category: .searchIn,
-            title: "Search Vulnerabilities for “\(query)”",
-            subtitle: "Filter the Vulnerabilities tab with this text.",
-            systemImage: "exclamationmark.shield",
-            target: .vulnerabilityQuery(query),
-            isSample: false
-        ))
+        results += vulnerabilityTextResults(for: query, in: feed)
+        results += noteResults(for: query, in: notes, references: references)
 
         // Stable sort by category so groups appear in declaration order while
         // preserving relevance order within each group.
@@ -77,16 +74,15 @@ enum SearchEngine {
 
     // MARK: Result builders
 
-    private static func cveResult(id: String, vulnerabilities: [Vulnerability]) -> SearchResult {
-        if let match = vulnerabilities.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) {
+    private static func cveResult(id: String, known: [Vulnerability]) -> SearchResult {
+        if let match = known.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) {
             return SearchResult(
                 id: "cve:\(match.id)",
                 category: .vulnerability,
                 title: match.id,
                 subtitle: match.summary,
                 systemImage: "exclamationmark.shield",
-                target: .vulnerability(match.id),
-                isSample: match.isSample
+                target: .vulnerability(match.id)
             )
         }
         return SearchResult(
@@ -95,8 +91,7 @@ enum SearchEngine {
             title: id,
             subtitle: "Not stored on this device. Opens a live lookup on NVD.",
             systemImage: "exclamationmark.shield",
-            target: .vulnerability(id),
-            isSample: false
+            target: .vulnerability(id)
         )
     }
 
@@ -108,15 +103,14 @@ enum SearchEngine {
                 title: topic.name,
                 subtitle: topic.category.title,
                 systemImage: topic.category.systemImage,
-                target: .researchTopic(topic.id),
-                isSample: false
+                target: .researchTopic(topic.id)
             )
         }
     }
 
-    private static func vulnerabilityTextResults(for query: String, in vulnerabilities: [Vulnerability]) -> [SearchResult] {
+    private static func vulnerabilityTextResults(for query: String, in feed: [Vulnerability]) -> [SearchResult] {
         guard query.count >= 2 else { return [] }
-        let matches = vulnerabilities.filter { $0.matches(searchText: query) }
+        let matches = feed.filter { $0.matches(searchText: query) }
         return matches.prefix(maxVulnerabilityMatches).map { vulnerability in
             SearchResult(
                 id: "cve:\(vulnerability.id)",
@@ -124,34 +118,59 @@ enum SearchEngine {
                 title: vulnerability.id,
                 subtitle: vulnerability.summary,
                 systemImage: "exclamationmark.shield",
-                target: .vulnerability(vulnerability.id),
-                isSample: vulnerability.isSample
+                target: .vulnerability(vulnerability.id)
             )
         }
     }
 
-    private static func noteResults(for query: String, in notes: [ResearchNote]) -> [SearchResult] {
-        let matches = notes.filter { note in
-            note.title.localizedCaseInsensitiveContains(query)
+    /// A note matches on its title, text and tags, and on anything it links to:
+    /// a CVE identifier, a technology, a product or a repository.
+    static func noteMatches(
+        for query: String,
+        in notes: [ResearchNote],
+        references: [NoteReference]
+    ) -> [ResearchNote] {
+        let linksByNote = Dictionary(
+            grouping: references.filter { !$0.isDismissed },
+            by: \.noteID
+        )
+        return notes.filter { note in
+            if note.title.localizedCaseInsensitiveContains(query)
                 || note.body.localizedCaseInsensitiveContains(query)
-                || note.tags.contains { $0.localizedCaseInsensitiveContains(query) }
+                || note.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) {
+                return true
+            }
+            return (linksByNote[note.id] ?? []).contains { reference in
+                reference.displayName.localizedCaseInsensitiveContains(query)
+                    || reference.entityID.localizedCaseInsensitiveContains(query)
+            }
         }
-        return matches.prefix(maxNoteMatches).map { note in
-            SearchResult(
-                id: "note:\(note.id.uuidString)",
-                category: .note,
-                title: note.displayTitle,
-                subtitle: note.body.isEmpty ? "No content" : String(note.body.prefix(120)),
-                systemImage: "note.text",
-                target: .note(note.id),
-                isSample: false
-            )
-        }
+    }
+
+    private static func noteResults(
+        for query: String,
+        in notes: [ResearchNote],
+        references: [NoteReference]
+    ) -> [SearchResult] {
+        noteMatches(for: query, in: notes, references: references)
+            .prefix(maxNoteMatches)
+            .map { note in
+                SearchResult(
+                    id: "note:\(note.id.uuidString)",
+                    category: .note,
+                    title: note.displayTitle,
+                    subtitle: note.body.isEmpty ? "No content" : String(note.body.prefix(120)),
+                    systemImage: "note.text",
+                    target: .note(note.id)
+                )
+            }
     }
 }
 
 extension Vulnerability {
     /// Case-insensitive match against the identifier, summary and product names.
+    /// Products also match by their display name, so "ios" finds a record whose
+    /// CPE product is `iphone_os`.
     func matches(searchText: String) -> Bool {
         let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return true }
@@ -162,6 +181,8 @@ extension Vulnerability {
             $0.vendor.localizedCaseInsensitiveContains(text)
                 || $0.product.localizedCaseInsensitiveContains(text)
                 || $0.versions.localizedCaseInsensitiveContains(text)
+                || AppleNaming.productName(vendor: $0.vendor, product: $0.product)
+                    .localizedCaseInsensitiveContains(text)
         }
     }
 }

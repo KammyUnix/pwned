@@ -2,8 +2,9 @@ import SwiftUI
 
 /// Browsable catalog of Apple platform and security topics.
 ///
-/// Phase 1 provides the catalog structure only. Written research content,
-/// cross-references and source classification are added in Phase 4.
+/// The catalog gives structure and cross-references (related topics,
+/// vulnerabilities, linked notes). Written research content is Phase 4 work
+/// that has not been done yet.
 struct ResearchLibraryView: View {
     @State private var searchText = ""
 
@@ -18,7 +19,7 @@ struct ResearchLibraryView: View {
                     }
                 }
                 Section {
-                    Label("Topic pages list names and aliases only. Written research is added in a later phase.",
+                    Label("Topic pages connect each topic to related topics, vulnerabilities on this device and your notes. Written research is added in a later phase.",
                           systemImage: "info.circle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

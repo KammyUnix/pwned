@@ -1,12 +1,16 @@
 import SwiftUI
 
-/// Data sources, the optional NVD API key and cache management.
+/// The app's one settings screen, reached from the Info tab.
 ///
-/// Clearing cached data removes downloaded NVD records only. Notes, bookmarks
-/// and search history live in a separate store and are never touched here.
-struct DataSettingsView: View {
+/// Every preference has exactly one home:
+/// * the NVD API key and cache controls are here;
+/// * showing uncertain Apple matches is a Discover filter, so it lives in
+///   Discover's filter menu and is only described here.
+///
+/// Clearing cached data removes downloaded NVD records only. Notes, links,
+/// bookmarks and search history live in a separate store and are never touched.
+struct SettingsView: View {
     @Environment(IntelligenceStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
 
     @State private var apiKeyInput = ""
     @State private var hasStoredKey = false
@@ -16,30 +20,24 @@ struct DataSettingsView: View {
     private static let keyRequestURL = URL(string: "https://nvd.nist.gov/developers/request-an-api-key")
 
     var body: some View {
-        NavigationStack {
-            Form {
-                sourceSection
-                apiKeySection
-                cacheSection
+        Form {
+            sourceSection
+            appleSection
+            apiKeySection
+            cacheSection
+        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            hasStoredKey = NVDAPIKeyStore.hasKey
+            await store.updateCacheStatistics()
+        }
+        .confirmationDialog("Clear cached data?", isPresented: $confirmsClear, titleVisibility: .visible) {
+            Button("Clear Cached Data", role: .destructive) {
+                Task { await store.clearCachedData() }
             }
-            .navigationTitle("Data & Cache")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .task {
-                hasStoredKey = NVDAPIKeyStore.hasKey
-                await store.updateCacheStatistics()
-            }
-            .confirmationDialog("Clear cached data?", isPresented: $confirmsClear, titleVisibility: .visible) {
-                Button("Clear Cached Data", role: .destructive) {
-                    Task { await store.clearCachedData() }
-                }
-            } message: {
-                Text("Downloaded vulnerability records are removed from this device. Your notes, bookmarks and search history are kept.")
-            }
+        } message: {
+            Text("Downloaded vulnerability records are removed from this device. Your notes, links, bookmarks and search history are kept. Nothing is shown in their place until you refresh.")
         }
     }
 
@@ -53,6 +51,19 @@ struct DataSettingsView: View {
             Text("Vulnerability Data")
         } footer: {
             Text(store.vulnerabilityState.summary)
+        }
+    }
+
+    private var appleSection: some View {
+        let otherCount = max(store.vulnerabilities.count - store.appleFeed.count - store.candidates.count, 0)
+        return Section {
+            LabeledContent("Apple Records", value: store.appleFeed.count.formatted())
+            LabeledContent("Needs Review", value: store.candidates.count.formatted())
+            LabeledContent("Other Saved Records", value: otherCount.formatted())
+        } header: {
+            Text("Apple Research Feed")
+        } footer: {
+            Text("Discover lists records NVD or Apple's security team tie to an Apple product. Records with weaker evidence are kept for review, and everything else stays saved but out of the feed. Include uncertain matches from the filter menu in Discover.")
         }
     }
 
@@ -97,7 +108,7 @@ struct DataSettingsView: View {
         } header: {
             Text("Cache")
         } footer: {
-            Text("Clearing removes vulnerability records downloaded from NVD. Notes, bookmarks and search history are not affected.")
+            Text("Clearing removes vulnerability records downloaded from NVD. Notes, links, bookmarks and search history are not affected.")
         }
     }
 

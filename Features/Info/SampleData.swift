@@ -1,13 +1,19 @@
 import Foundation
 
-/// Development sample data.
+/// SAMPLE / DEVELOPMENT DATA.
 ///
-/// Everything here is synthetic and carries `InformationProvenance.sample`, so
-/// the UI labels it as sample data. Identifiers use the year 2099
-/// (`CVE-2099-…`), which cannot collide with a real CVE, and no record
-/// describes a real vulnerability, advisory or repository. It is replaced by
-/// live sources in later phases.
+/// Everything here is synthetic and carries `InformationProvenance.sample`.
+/// Identifiers use the year 2099 (`CVE-2099-…`), which cannot collide with a real
+/// CVE, and no record describes a real vulnerability, advisory or repository.
+///
+/// This data is preserved for development and is reachable only from the
+/// Easter egg on the Info tab (`SampleDataView`). It is deliberately kept out of
+/// the `IntelligenceStore`, the on-disk cache, SwiftData, search and every
+/// normal screen, and it is never used as a fallback when a request fails or
+/// the cache is cleared.
 enum SampleData {
+    static let label = "SAMPLE / DEVELOPMENT DATA"
+
     private static func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
         let components = DateComponents(calendar: Calendar(identifier: .gregorian),
                                         timeZone: TimeZone(secondsFromGMT: 0),

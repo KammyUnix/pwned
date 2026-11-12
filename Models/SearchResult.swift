@@ -4,7 +4,7 @@ import Foundation
 enum SearchTarget: Hashable, Sendable {
     /// A CVE identifier. Opens the record if one exists locally.
     case vulnerability(String)
-    /// Free text to filter the Vulnerabilities tab with.
+    /// Free text to put in Discover's search field.
     case vulnerabilityQuery(String)
     /// An Apple Research Center topic, by slug.
     case researchTopic(String)
@@ -21,7 +21,6 @@ enum SearchCategory: Int, CaseIterable, Identifiable, Sendable {
     case appleVersion
     case appleResearch
     case note
-    case searchIn
 
     var id: Int { rawValue }
 
@@ -32,7 +31,6 @@ enum SearchCategory: Int, CaseIterable, Identifiable, Sendable {
         case .appleVersion: "Apple Platform Version"
         case .appleResearch: "Apple Research"
         case .note: "Notes"
-        case .searchIn: "Search In"
         }
     }
 }
@@ -44,5 +42,4 @@ struct SearchResult: Identifiable, Hashable, Sendable {
     let subtitle: String
     let systemImage: String
     let target: SearchTarget
-    let isSample: Bool
 }

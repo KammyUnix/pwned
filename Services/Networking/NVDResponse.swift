@@ -123,11 +123,27 @@ struct NVDResponse: Decodable, Sendable {
     // MARK: Configurations (analyzed CPE matches)
 
     struct Configuration: Decodable, Sendable {
+        /// `AND` when the nodes must all apply (software running on a platform), `OR` otherwise.
+        let configurationOperator: String?
         let nodes: [Node]?
+
+        private enum CodingKeys: String, CodingKey {
+            case configurationOperator = "operator"
+            case nodes
+        }
     }
 
     struct Node: Decodable, Sendable {
+        let nodeOperator: String?
+        /// When true the matches describe what must *not* be present.
+        let negate: Bool?
         let cpeMatch: [CPEMatch]?
+
+        private enum CodingKeys: String, CodingKey {
+            case nodeOperator = "operator"
+            case negate
+            case cpeMatch
+        }
     }
 
     struct CPEMatch: Decodable, Sendable {

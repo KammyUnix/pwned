@@ -12,14 +12,15 @@ struct ProvenanceLabel: View {
     }
 }
 
-/// Inline notice shown above content that comes from built-in sample data.
+/// Banner for the development data screen. Sample data appears nowhere else in
+/// the app, so this is the only place that needs to say what it is.
 struct SampleDataNotice: View {
-    var message = "These records are built-in development samples, not real intelligence. Live sources are added in later phases."
+    var message = "These records are built-in development samples, not real intelligence. They are not stored in the database or the cache and are never used when a request fails."
 
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Sample Data")
+                Text(SampleData.label)
                     .font(.subheadline.weight(.semibold))
                 Text(message)
                     .font(.footnote)

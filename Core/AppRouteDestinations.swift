@@ -16,6 +16,16 @@ extension View {
                 RepositoryPreviewView(reference: reference)
             case .note(let id):
                 NoteEditorView(noteID: id)
+            case .candidates:
+                CandidatesView()
+            case .openRepository:
+                OpenRepositoryView()
+            case .laboratory:
+                LaboratoryView()
+            case .settings:
+                SettingsView()
+            case .sampleData:
+                SampleDataView()
             }
         }
     }

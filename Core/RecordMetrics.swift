@@ -11,8 +11,8 @@ extension DataSourceState {
     /// One-line, user-facing description of where the data came from.
     var summary: String {
         switch self {
-        case .sample:
-            return "Sample data. No live source has been queried."
+        case .empty:
+            return "Nothing is saved on this device yet."
         case .cached(let lastUpdated):
             guard let lastUpdated else { return "Saved on this device." }
             return "Saved on this device. Last updated \(lastUpdated.formatted(date: .abbreviated, time: .shortened))."

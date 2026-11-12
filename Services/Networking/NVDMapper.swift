@@ -39,7 +39,8 @@ enum NVDMapper {
             additionalScores: Array(scoreSet.dropFirst()),
             kev: knownExploited(from: cve),
             sourceIdentifier: cve.sourceIdentifier,
-            omittedProductCount: products.omitted
+            omittedProductCount: products.omitted,
+            runsOn: platformContext(from: cve)
         )
     }
 
@@ -212,9 +213,10 @@ enum NVDMapper {
             }
         }
 
-        // 1. Products NVD analysts matched to CPE configurations.
+        // 1. Products NVD analysts matched to CPE configurations. A negated node
+        //    lists what must NOT be present, so it never names an affected product.
         for configuration in cve.configurations {
-            for node in configuration.nodes ?? [] {
+            for node in configuration.nodes ?? [] where node.negate != true {
                 for match in node.cpeMatch ?? [] where match.vulnerable == true {
                     guard let criteria = match.criteria, let cpe = CPEName(criteria) else { continue }
                     add(vendor: cpe.vendor, product: cpe.product,
@@ -255,6 +257,50 @@ enum NVDMapper {
             )
         }
         return (items, max(order.count - keys.count, 0))
+    }
+
+    /// Apple platforms that appear in a configuration as non-vulnerable context.
+    ///
+    /// NVD expresses "software X running on iOS" as an AND configuration: X is
+    /// marked vulnerable and iOS is listed alongside it as *not* vulnerable.
+    /// That is the difference between a vulnerability in iOS and one in an app
+    /// that merely runs on it, so it is recorded separately and only for Apple
+    /// vendors (the one case classification needs).
+    private static func platformContext(from cve: NVDResponse.CVE) -> [AffectedProduct]? {
+        var order: [String] = []
+        var table: [String: ProductAccumulator] = [:]
+
+        for configuration in cve.configurations {
+            // Only AND configurations pair a vulnerable product with a platform.
+            guard configuration.configurationOperator?.uppercased() == "AND" else { continue }
+            for node in configuration.nodes ?? [] where node.negate != true {
+                for match in node.cpeMatch ?? [] where match.vulnerable != true {
+                    guard let criteria = match.criteria,
+                          let cpe = CPEName(criteria),
+                          AppleNaming.isApple(cpe.vendor) else { continue }
+                    let key = "\(cpe.vendor.lowercased())|\(cpe.product.lowercased())"
+                    if table[key] == nil {
+                        table[key] = ProductAccumulator(vendor: cpe.vendor, product: cpe.product, origin: .nvdAnalysis)
+                        order.append(key)
+                    }
+                    let version = describe(match, cpe: cpe)
+                    if table[key]?.versions.contains(version) == false {
+                        table[key]?.versions.append(version)
+                    }
+                }
+            }
+        }
+
+        let items = order.prefix(12).compactMap { key -> AffectedProduct? in
+            guard let entry = table[key] else { return nil }
+            return AffectedProduct(
+                vendor: entry.vendor,
+                product: entry.product,
+                versions: entry.versions.prefix(maxVersionsPerProduct).joined(separator: "; "),
+                origin: .nvdAnalysis
+            )
+        }
+        return items.isEmpty ? nil : items
     }
 
     private static func clean(_ text: String?) -> String? {

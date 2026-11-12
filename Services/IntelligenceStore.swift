@@ -1,10 +1,10 @@
 import Foundation
 import Observation
 
-/// Where the data currently shown in a section came from.
+/// Where the data currently shown came from.
 enum DataSourceState: Equatable {
-    /// Built-in development data only. No live source has been queried.
-    case sample
+    /// Nothing has been loaded on this device yet. Never filled with made-up data.
+    case empty
     /// Records saved on this device. `lastUpdated` is when they were last refreshed from the network.
     case cached(lastUpdated: Date?)
     /// Fetched from the network during this session.
@@ -35,28 +35,38 @@ struct KeywordSearchState: Equatable {
     var error: String?
 }
 
-/// Single source of truth for intelligence data shown across the app.
+/// Single source of truth for vulnerability intelligence shown across the app.
 ///
-/// Vulnerabilities come from the on-disk cache and the NVD CVE API. Apple
-/// advisories, announcements and repository summaries are still built-in
-/// samples; later phases replace them behind this same interface.
+/// Two layers are kept apart on purpose:
+///
+/// * **Broad ingestion.** `vulnerabilities` holds every record the device knows
+///   about: the Apple-focused feed, CVEs opened from a note, keyword search
+///   results. Nothing is thrown away just because it isn't Apple's.
+/// * **The Apple feed.** `appleFeed` is the subset the classifier judges to
+///   concern the Apple ecosystem. Discover shows this; records with weaker
+///   evidence are kept as `candidates` rather than discarded.
+///
+/// Records come from the on-disk cache and the NVD API only. When neither has
+/// anything, the store is empty. It never substitutes sample data; that lives
+/// in `SampleData`, reachable only from the Info tab's development data screen.
 @MainActor
 @Observable
 final class IntelligenceStore {
-    // MARK: Sample-backed sections
-
-    private(set) var appleAdvisories: [AppleAdvisory]
-    private(set) var announcements: [SecurityAnnouncement]
-    private(set) var repositories: [RepositorySummary]
-    /// State of the sample-backed sections above.
-    private(set) var state: DataSourceState
-
-    // MARK: Vulnerabilities
+    // MARK: Records
 
     /// Every known record, newest publication first.
-    private(set) var vulnerabilities: [Vulnerability]
-    private(set) var vulnerabilityState: DataSourceState
+    private(set) var vulnerabilities: [Vulnerability] = []
+    /// Apple relevance for each record, keyed by upper-cased CVE ID.
+    private(set) var classifications: [String: AppleClassification] = [:]
+    /// Records judged likely or confirmed to concern Apple, newest first.
+    private(set) var appleFeed: [Vulnerability] = []
+    /// Records with some Apple evidence that isn't enough to call them Apple's.
+    private(set) var candidates: [Vulnerability] = []
+
+    private(set) var vulnerabilityState: DataSourceState = .empty
     private(set) var refreshPhase: RefreshPhase = .idle
+    /// Notes about parts of the last refresh that didn't complete.
+    private(set) var refreshNotices: [String] = []
     private(set) var isLoadingEarlier = false
     private(set) var canLoadEarlier = false
     private(set) var earlierError: String?
@@ -64,7 +74,7 @@ final class IntelligenceStore {
     private(set) var lookups: [String: LookupState] = [:]
     private(set) var cacheRecordCount = 0
     private(set) var cacheSizeBytes: Int64 = 0
-    private var recordsByID: [String: Vulnerability]
+    private var recordsByID: [String: Vulnerability] = [:]
 
     private let service: VulnerabilityService?
     @ObservationIgnored private var feedOldest: Date?
@@ -74,50 +84,27 @@ final class IntelligenceStore {
     /// NVD asks clients not to poll aggressively, so an automatic refresh only
     /// happens when the data is older than this. Pull to refresh overrides it.
     private static let staleInterval: TimeInterval = 2 * 60 * 60
-    private static let windowLength: TimeInterval = 24 * 60 * 60
+    /// Apple publishes security content in bursts weeks apart, so the feed
+    /// window is a month rather than a day.
+    private static let windowLength: TimeInterval = 30 * 24 * 60 * 60
 
     /// - Parameter service: Pass `VulnerabilityService.live()` for network and
-    ///   cache access. With `nil` (previews) the store serves its initial data only.
+    ///   cache access. With `nil` (previews, tests) the store serves `vulnerabilities` only.
     init(
-        vulnerabilities: [Vulnerability] = SampleData.vulnerabilities,
-        appleAdvisories: [AppleAdvisory] = SampleData.appleAdvisories,
-        announcements: [SecurityAnnouncement] = SampleData.announcements,
-        repositories: [RepositorySummary] = SampleData.repositories,
-        state: DataSourceState = .sample,
+        vulnerabilities: [Vulnerability] = [],
+        state: DataSourceState = .empty,
         service: VulnerabilityService? = nil
     ) {
-        self.recordsByID = Dictionary(
-            vulnerabilities.map { ($0.id.uppercased(), $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        self.vulnerabilities = vulnerabilities.sorted(by: VulnerabilityFilter.newestPublishedFirst)
-        self.vulnerabilityState = state
-        self.appleAdvisories = appleAdvisories
-        self.announcements = announcements
-        self.repositories = repositories
-        self.state = state
         self.service = service
+        merge(vulnerabilities, classifications: AppleClassifier.classify(vulnerabilities), state: state)
     }
 
     // MARK: Derived data
 
-    var isShowingSampleData: Bool { state == .sample }
-    var isShowingSampleVulnerabilities: Bool { vulnerabilityState == .sample }
     var hasNetworkService: Bool { service != nil }
 
-    /// Newest publication first.
-    var recentVulnerabilities: [Vulnerability] { vulnerabilities }
-
-    var recentAdvisories: [AppleAdvisory] {
-        appleAdvisories.sorted { $0.updatedAt > $1.updatedAt }
-    }
-
-    var recentRepositories: [RepositorySummary] {
-        repositories.sorted { $0.updatedAt > $1.updatedAt }
-    }
-
-    var recentAnnouncements: [SecurityAnnouncement] {
-        announcements.sorted { $0.date > $1.date }
+    func classification(for id: String) -> AppleClassification? {
+        classifications[id.uppercased()]
     }
 
     func vulnerability(id: String) -> Vulnerability? {
@@ -126,6 +113,23 @@ final class IntelligenceStore {
 
     func vulnerabilities(withIDs ids: [String]) -> [Vulnerability] {
         ids.compactMap { vulnerability(id: $0) }
+    }
+
+    /// The Discover feed: Apple-focused records, plus the uncertain candidates
+    /// when the user has chosen to include them.
+    func feed(includingCandidates: Bool) -> [Vulnerability] {
+        guard includingCandidates else { return appleFeed }
+        return (appleFeed + candidates).sorted(by: VulnerabilityFilter.newestPublishedFirst)
+    }
+
+    /// Apple-focused records that concern a research topic: an operating system
+    /// (by platform) or a component the classifier tagged.
+    func appleVulnerabilities(forTopic topicID: String) -> [Vulnerability] {
+        appleFeed.filter { record in
+            guard let classification = classifications[record.id.uppercased()] else { return false }
+            if classification.componentIDs.contains(topicID) { return true }
+            return classification.platforms.contains { $0.rawValue.lowercased() == topicID }
+        }
     }
 
     /// Other loaded records that list the same vendor and product as `vulnerability`'s first affected product.
@@ -154,7 +158,7 @@ final class IntelligenceStore {
         let cached = await service.cachedContents()
         if !cached.vulnerabilities.isEmpty {
             lastRefreshed = cached.lastRefreshed
-            adopt(cached.vulnerabilities, as: .cached(lastUpdated: cached.lastRefreshed))
+            await adopt(cached.vulnerabilities, as: .cached(lastUpdated: cached.lastRefreshed))
         }
         await updateCacheStatistics()
         await refreshIfStale()
@@ -170,22 +174,24 @@ final class IntelligenceStore {
 
     // MARK: Feed
 
-    /// Fetches the CVEs published in the last 24 hours.
+    /// Fetches the Apple-focused CVEs published in the last 30 days.
     func refresh() async {
         guard let service, refreshPhase != .loading else { return }
         refreshPhase = .loading
+        refreshNotices = []
 
         let end = Date()
         let start = end.addingTimeInterval(-Self.windowLength)
         do {
-            let result = try await service.fetchWindow(from: start, to: end, markRefreshed: true)
-            adopt(result.vulnerabilities, as: .live(lastUpdated: end))
+            let result = try await service.fetchAppleFeed(from: start, to: end, markRefreshed: true)
+            await adopt(result.vulnerabilities, as: .live(lastUpdated: end))
             feedOldest = start
             canLoadEarlier = true
             if result.isComplete {
                 lastRefreshed = end
             }
-            refreshPhase = result.error.map { RefreshPhase.failed($0.localizedDescription) } ?? .idle
+            refreshNotices = result.notices
+            refreshPhase = .idle
         } catch {
             let mapped = NetworkError.map(error)
             refreshPhase = (mapped == .cancelled) ? .idle : .failed(mapped.localizedDescription)
@@ -193,7 +199,7 @@ final class IntelligenceStore {
         await updateCacheStatistics()
     }
 
-    /// Fetches the 24 hours before the oldest window loaded so far.
+    /// Fetches the 30 days before the oldest window loaded so far.
     func loadEarlier() async {
         guard let service, let oldest = feedOldest, !isLoadingEarlier else { return }
         isLoadingEarlier = true
@@ -202,12 +208,12 @@ final class IntelligenceStore {
 
         let start = oldest.addingTimeInterval(-Self.windowLength)
         do {
-            let result = try await service.fetchWindow(from: start, to: oldest, markRefreshed: false)
-            adopt(result.vulnerabilities, as: vulnerabilityState)
+            let result = try await service.fetchAppleFeed(from: start, to: oldest, markRefreshed: false)
+            await adopt(result.vulnerabilities, as: vulnerabilityState)
             if result.isComplete {
                 feedOldest = start
             }
-            earlierError = result.error?.localizedDescription
+            earlierError = result.notices.first
         } catch {
             let mapped = NetworkError.map(error)
             earlierError = (mapped == .cancelled) ? nil : mapped.localizedDescription
@@ -225,7 +231,7 @@ final class IntelligenceStore {
         keywordSearch = KeywordSearchState(keyword: term, totalResults: 0, remaining: 0, isLoading: true)
         do {
             let slice = try await service.startKeywordSearch(term)
-            adopt(slice.vulnerabilities, as: stateAfterNetworkFetch())
+            await adopt(slice.vulnerabilities, as: stateAfterNetworkFetch())
             keywordSearch = KeywordSearchState(keyword: term, totalResults: slice.totalResults, remaining: slice.remaining)
         } catch {
             let mapped = NetworkError.map(error)
@@ -250,7 +256,7 @@ final class IntelligenceStore {
             let slice = try await service.nextKeywordSlice(
                 search.keyword, end: search.remaining, totalResults: search.totalResults
             )
-            adopt(slice.vulnerabilities, as: stateAfterNetworkFetch())
+            await adopt(slice.vulnerabilities, as: stateAfterNetworkFetch())
             keywordSearch = KeywordSearchState(
                 keyword: search.keyword, totalResults: slice.totalResults, remaining: slice.remaining
             )
@@ -278,7 +284,7 @@ final class IntelligenceStore {
         lookups[key] = .loading
         do {
             if let record = try await service.lookup(cveID: key) {
-                adopt([record], as: stateAfterNetworkFetch())
+                await adopt([record], as: stateAfterNetworkFetch())
                 lookups[key] = nil
             } else {
                 lookups[key] = .notFound
@@ -304,18 +310,19 @@ final class IntelligenceStore {
     }
 
     /// Deletes cached NVD records. Notes, bookmarks and history live in a
-    /// different store and are not touched. The list falls back to labeled
-    /// sample data until the next refresh.
+    /// different store and are not touched. The store is left empty until the
+    /// next refresh: sample data is never brought back as a stand-in.
     func clearCachedData() async {
         await service?.clearCache()
 
-        recordsByID = Dictionary(
-            SampleData.vulnerabilities.map { ($0.id.uppercased(), $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        vulnerabilities = SampleData.vulnerabilities.sorted(by: VulnerabilityFilter.newestPublishedFirst)
-        vulnerabilityState = .sample
+        recordsByID = [:]
+        vulnerabilities = []
+        classifications = [:]
+        appleFeed = []
+        candidates = []
+        vulnerabilityState = .empty
         refreshPhase = .idle
+        refreshNotices = []
         keywordSearch = nil
         lookups = [:]
         feedOldest = nil
@@ -327,20 +334,35 @@ final class IntelligenceStore {
 
     // MARK: Private
 
-    /// Merges records into the store. The first real data replaces the sample records.
-    private func adopt(_ incoming: [Vulnerability], as newState: DataSourceState) {
-        if vulnerabilityState == .sample {
-            recordsByID = [:]
-        }
+    /// Classifies off the main thread, then merges into the store.
+    private func adopt(_ incoming: [Vulnerability], as newState: DataSourceState) async {
+        let fresh = await Task.detached(priority: .userInitiated) {
+            AppleClassifier.classify(incoming)
+        }.value
+        merge(incoming, classifications: fresh, state: newState)
+    }
+
+    private func merge(
+        _ incoming: [Vulnerability],
+        classifications fresh: [String: AppleClassification],
+        state newState: DataSourceState
+    ) {
         for record in incoming {
             recordsByID[record.id.uppercased()] = record
         }
-        vulnerabilities = recordsByID.values.sorted(by: VulnerabilityFilter.newestPublishedFirst)
+        for (id, classification) in fresh {
+            classifications[id] = classification
+        }
+
+        let sorted = recordsByID.values.sorted(by: VulnerabilityFilter.newestPublishedFirst)
+        vulnerabilities = sorted
+        appleFeed = sorted.filter { classifications[$0.id.uppercased()]?.relevance.isAppleFocused == true }
+        candidates = sorted.filter { classifications[$0.id.uppercased()]?.relevance == .uncertain }
         vulnerabilityState = newState
     }
 
     /// State to show after a successful fetch that isn't a feed refresh.
     private func stateAfterNetworkFetch() -> DataSourceState {
-        vulnerabilityState == .sample ? .live(lastUpdated: Date()) : vulnerabilityState
+        vulnerabilityState == .empty ? .live(lastUpdated: Date()) : vulnerabilityState
     }
 }

@@ -13,6 +13,10 @@ settings:
     TARGETED_DEVICE_FAMILY: "1,2"
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: Pwned
+    # The Info tab reads these back from the bundle, so this is the one place
+    # the version and build are set.
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
 
 targets:
   Pwned:
@@ -32,3 +36,38 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: by.thekammy.pwned
         PRODUCT_NAME: Pwned
         CODE_SIGNING_ALLOWED: NO
+        # Temporary placeholder icon: Resources/Assets.xcassets/AppIcon.appiconset
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  PwnedTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Pwned
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: by.thekammy.pwned.tests
+        PRODUCT_NAME: PwnedTests
+        CODE_SIGNING_ALLOWED: NO
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Pwned.app/Pwned"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  Pwned:
+    build:
+      targets:
+        Pwned: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - PwnedTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
