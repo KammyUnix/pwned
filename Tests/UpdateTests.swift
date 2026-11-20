@@ -101,7 +101,8 @@ final class UpdateCheckerTests: XCTestCase {
 
     func testDecodesTheReleaseFields() async throws {
         let (checker, _) = checker()
-        let release = try await XCTUnwrap(checker.latestRelease())
+        let latest = try await checker.latestRelease()
+        let release = try XCTUnwrap(latest)
 
         XCTAssertEqual(release.tagName, "v0.5.0")
         XCTAssertEqual(release.title, "Pwned 0.5.0")

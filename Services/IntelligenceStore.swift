@@ -172,7 +172,7 @@ final class IntelligenceStore {
 
     /// Whether an automatic refresh is due. Off in Settings means never; pull
     /// to refresh still works. Otherwise data must be older than the chosen interval.
-    static func shouldRefresh(
+    nonisolated static func shouldRefresh(
         lastRefreshed: Date?,
         now: Date = Date(),
         defaults: UserDefaults = .standard

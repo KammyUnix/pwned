@@ -56,6 +56,19 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Pwned.app/Pwned"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
+  PwnedUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Pwned
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: by.thekammy.pwned.uitests
+        PRODUCT_NAME: PwnedUITests
+        CODE_SIGNING_ALLOWED: NO
+
 schemes:
   Pwned:
     build:
@@ -67,6 +80,7 @@ schemes:
       config: Debug
       targets:
         - PwnedTests
+        - PwnedUITests
     profile:
       config: Release
     analyze:

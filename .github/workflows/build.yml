@@ -1,21 +1,101 @@
 name: Build Pwned
 
+# Every push to main builds an unsigned IPA and keeps it as a development
+# artifact for 14 days. Pushing a version tag (v0.4.0) builds the same IPA and
+# publishes it as a GitHub Release. See docs/RELEASING.md.
+
 on:
   push:
     branches:
       - main
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
+    inputs:
+      release_dry_run:
+        description: 'Rehearse a release: build, write the release notes and checksum, but publish nothing'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A new push to main replaces an older unfinished development build.
+# A tag build is never cancelled halfway.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build:
     runs-on: macos-26
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      build: ${{ steps.meta.outputs.build }}
+      tag: ${{ steps.meta.outputs.tag }}
+      channel: ${{ steps.meta.outputs.channel }}
+      ipa: ${{ steps.meta.outputs.ipa }}
+      artifact: ${{ steps.meta.outputs.artifact }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Read version and choose channel
+        id: meta
+        env:
+          DRY_RUN: ${{ inputs.release_dry_run }}
+        run: |
+          set -euo pipefail
+
+          # project.yml is the one place the version and build number are set.
+          VERSION=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' project.yml | head -n 1)
+          BUILD=$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/p' project.yml | head -n 1)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error title=Bad version::MARKETING_VERSION in project.yml is '$VERSION'. Expected something like 0.4.0."
+            exit 1
+          fi
+          if ! [[ "$BUILD" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Bad build number::CURRENT_PROJECT_VERSION in project.yml is '$BUILD'. Expected a whole number."
+            exit 1
+          fi
+
+          TAG=""
+          CHANNEL=development
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+            # A pre-release tag (v0.5.0-beta.1) carries the same version as project.yml,
+            # because the app's version can't hold a suffix.
+            CORE="${TAG#v}"
+            CORE="${CORE%%-*}"
+            CORE="${CORE%%+*}"
+            if [[ "$CORE" != "$VERSION" ]]; then
+              echo "::error title=Tag and version differ::Tag $TAG does not match MARKETING_VERSION $VERSION in project.yml. Change project.yml first, or tag v$VERSION."
+              exit 1
+            fi
+            if [[ "$TAG" == *-* ]]; then CHANNEL=prerelease; else CHANNEL=production; fi
+          elif [[ "$DRY_RUN" == "true" ]]; then
+            TAG="v$VERSION"
+            CHANNEL=dry-run
+          fi
+
+          if [[ "$CHANNEL" == development ]]; then
+            IPA="Pwned-${VERSION}-dev-${GITHUB_SHA::7}-unsigned.ipa"
+            ARTIFACT="Pwned-dev-IPA"
+          else
+            IPA="Pwned-${TAG#v}-unsigned.ipa"
+            ARTIFACT="Pwned-release-IPA"
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "build=$BUILD"
+            echo "tag=$TAG"
+            echo "channel=$CHANNEL"
+            echo "ipa=$IPA"
+            echo "artifact=$ARTIFACT"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION, build $BUILD, channel $CHANNEL, file $IPA"
 
       - name: Select Xcode
         run: |
@@ -41,16 +121,119 @@ jobs:
             build
 
       - name: Package IPA
+        env:
+          IPA: ${{ steps.meta.outputs.ipa }}
         run: |
           mkdir -p build/Payload
           cp -R build/DerivedData/Build/Products/Release-iphoneos/Pwned.app build/Payload/
           cd build
-          zip -r Pwned-unsigned.ipa Payload
+          zip -r "$IPA" Payload
+          shasum -a 256 "$IPA" > "$IPA.sha256"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Pwned-unsigned-IPA
-          path: build/Pwned-unsigned.ipa
+          name: ${{ steps.meta.outputs.artifact }}
+          path: |
+            build/${{ steps.meta.outputs.ipa }}
+            build/${{ steps.meta.outputs.ipa }}.sha256
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    # Development builds never reach this job.
+    if: needs.build.outputs.channel != 'development'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+      BUILD: ${{ needs.build.outputs.build }}
+      TAG: ${{ needs.build.outputs.tag }}
+      CHANNEL: ${{ needs.build.outputs.channel }}
+      IPA: ${{ needs.build.outputs.ipa }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: release
+
+      - name: Check for an existing release
+        id: existing
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release already exists::$TAG is already published, so nothing was created or changed."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+
+          # Compare with the newest other version tag, if there is one.
+          PREVIOUS=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -vxF "$TAG" | head -n 1 || true)
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then END="$TAG"; else END=HEAD; fi
+          if [[ -n "$PREVIOUS" ]]; then RANGE="$PREVIOUS..$END"; else RANGE="$END"; fi
+          CHANGES=$(git log -n 15 "$RANGE" --no-merges --pretty='- %s')
+
+          {
+            if [[ "$CHANNEL" == "prerelease" ]]; then
+              echo "Pre-release, build $BUILD. The app does not offer pre-releases as updates."
+            else
+              echo "Build $BUILD."
+            fi
+            echo
+            echo "**Changes**"
+            if [[ -n "$CHANGES" ]]; then echo "$CHANGES"; else echo "- No changes recorded."; fi
+            echo
+            if [[ -n "$PREVIOUS" ]]; then
+              echo "Full changelog: https://github.com/$GITHUB_REPOSITORY/compare/$PREVIOUS...$TAG"
+              echo
+            fi
+            echo "**Installing**"
+            echo "The IPA is unsigned. Sign it with your own certificate, or use a sideloading tool that signs it for you, before installing it on a device."
+          } > release-notes.md
+
+          {
+            echo "### Release $TAG ($CHANNEL)"
+            echo
+            cat release-notes.md
+            echo
+            echo "File: \`$IPA\`"
+            echo
+            echo "Checksum: \`$(cut -d' ' -f1 "release/$IPA.sha256")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release
+        if: steps.existing.outputs.exists == 'false' && needs.build.outputs.channel != 'dry-run'
+        run: |
+          set -euo pipefail
+          ARGS=(--title "Pwned ${TAG#v}" --notes-file release-notes.md --verify-tag)
+          if [[ "$CHANNEL" == "prerelease" ]]; then
+            ARGS+=(--prerelease)
+          else
+            ARGS+=(--latest)
+          fi
+          gh release create "$TAG" "release/$IPA" "release/$IPA.sha256" "${ARGS[@]}"
+
+      - name: Keep the notes from a rehearsal
+        if: needs.build.outputs.channel == 'dry-run'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pwned-release-preview
+          path: |
+            release-notes.md
+            release/${{ needs.build.outputs.ipa }}.sha256
+          retention-days: 7
