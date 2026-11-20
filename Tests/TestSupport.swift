@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 @testable import Pwned
 
 /// An HTTP transport that records requests and answers from a closure.
@@ -73,5 +74,18 @@ enum NVDFixtures {
     static func decode(_ json: String) throws -> [Vulnerability] {
         let response = try JSONDecoder().decode(NVDResponse.self, from: Data(json.utf8))
         return NVDMapper.vulnerabilities(from: response)
+    }
+}
+
+extension XCTestCase {
+    /// A private `UserDefaults` suite, removed when the test ends, so tests never
+    /// read or change the real preferences.
+    func makeIsolatedDefaults() -> UserDefaults {
+        let name = "PwnedTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        addTeardownBlock {
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+        }
+        return defaults
     }
 }

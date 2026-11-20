@@ -147,7 +147,7 @@ struct NoteEditorView: View {
                         if AppSettings.bool(AppSettings.confirmNoteDeletionKey, default: AppSettings.Default.confirmNoteDeletion) {
                             confirmsDelete = true
                         } else {
-                            removeNote()
+                            removeNote(note)
                         }
                     } label: {
                         Label("Delete Note", systemImage: "trash")
@@ -162,7 +162,7 @@ struct NoteEditorView: View {
         }
         .confirmationDialog("Delete this note?", isPresented: $confirmsDelete, titleVisibility: .visible) {
             Button("Delete Note", role: .destructive) {
-                removeNote()
+                removeNote(note)
             }
         } message: {
             Text("This can't be undone.")
@@ -325,7 +325,7 @@ struct NoteEditorView: View {
         }
     }
 
-    private func removeNote() {
+    private func removeNote(_ note: ResearchNote) {
         modelContext.deleteReferences(forNote: note.id)
         modelContext.delete(note)
         modelContext.saveLoggingFailure()
