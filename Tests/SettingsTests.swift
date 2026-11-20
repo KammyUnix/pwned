@@ -133,7 +133,7 @@ final class FilterPreferencesTests: XCTestCase {
         defaults.set(VulnerabilitySort.severity.rawValue, forKey: AppSettings.defaultSortKey)
         defaults.set(SeverityThreshold.high.rawValue, forKey: AppSettings.defaultSeverityKey)
         defaults.set(true, forKey: AppSettings.defaultExploitedKey)
-        defaults.set("ios,macos", forKey: AppSettings.defaultPlatformsKey)
+        defaults.set("iOS,macOS", forKey: AppSettings.defaultPlatformsKey)
 
         let filter = FilterPreferences.read(from: defaults).filter
 
@@ -152,7 +152,7 @@ final class FilterPreferencesTests: XCTestCase {
     }
 
     func testUnknownStoredValuesFallBackToTheDefaults() {
-        let preferences = FilterPreferences(sortRaw: "nonsense", severityRaw: "nonsense", knownExploitedOnly: false, platformsRaw: "ios,toaster")
+        let preferences = FilterPreferences(sortRaw: "nonsense", severityRaw: "nonsense", knownExploitedOnly: false, platformsRaw: "iOS,toaster")
         XCTAssertEqual(preferences.sort, .published)
         XCTAssertEqual(preferences.severity, .any)
         XCTAssertEqual(preferences.platforms, [.iOS], "Unknown platform names are ignored")

@@ -16,8 +16,8 @@ struct InfoView: View {
         NavigationStack(path: $router.infoPath) {
             List {
                 heroSection
-                updateSection
 
+                // Settings sits right under the header so it is on screen without scrolling.
                 Section {
                     NavigationLink(value: AppRoute.settings) {
                         Label {
@@ -28,6 +28,7 @@ struct InfoView: View {
                     }
                 }
 
+                updateSection
                 aboutSection
                 legalSection
             }

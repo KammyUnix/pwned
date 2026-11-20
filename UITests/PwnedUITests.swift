@@ -28,6 +28,15 @@ final class PwnedUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Saves the on-screen element tree, with every frame, as a text attachment.
+    /// The Test Pwned workflow prints these into its log.
+    private func layoutReport(_ name: String, in app: XCUIApplication) {
+        let attachment = XCTAttachment(string: "== \(name) ==\nwindow \(app.windows.firstMatch.frame)\n\(app.debugDescription)")
+        attachment.name = "layout-\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     /// The first element, of any type, whose label is exactly `label`.
     private func item(_ label: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any)
@@ -59,8 +68,9 @@ final class PwnedUITests: XCTestCase {
     }
 
     private func openSettings(_ app: XCUIApplication) {
-        let settings = item("Settings", in: app)
-        XCTAssertTrue(settings.waitForExistence(timeout: 10), "The Settings row is missing from Info")
+        XCTAssertTrue(app.navigationBars["Info"].waitForExistence(timeout: 10))
+        let settings = item(startingWith: "Settings", in: app)
+        XCTAssertTrue(reveal(settings, in: app), "The Settings row is missing from Info")
         settings.tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5), "Settings did not open")
     }
@@ -70,8 +80,8 @@ final class PwnedUITests: XCTestCase {
     }
 
     private func openPage(_ title: String, in app: XCUIApplication) {
-        let row = item(title, in: app)
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "\(title) is missing from the Settings hub")
+        let row = item(startingWith: title, in: app)
+        XCTAssertTrue(reveal(row, in: app), "\(title) is missing from the Settings hub")
         row.tap()
         XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5), "\(title) did not open")
     }
@@ -80,6 +90,7 @@ final class PwnedUITests: XCTestCase {
     private func visitPage(_ title: String, in app: XCUIApplication, screenshot: String) {
         openPage(title, in: app)
         snapshot(screenshot)
+        layoutReport(screenshot, in: app)
         goBack(app)
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5), "Did not return to Settings")
     }
@@ -129,6 +140,20 @@ final class PwnedUITests: XCTestCase {
         XCTAssertTrue(item(startingWith: "Version", in: app).exists, "The version is not shown")
         XCTAssertTrue(item(startingWith: "Build", in: app).exists, "The build is not shown")
         snapshot("info-top")
+        layoutReport("info-top", in: app)
+
+        // Layout: the icon is large, centred and at the top; the pills fit on screen;
+        // Settings is reachable without scrolling.
+        let window = app.windows.firstMatch.frame
+        let icon = item(startingWith: "Pwned app icon", in: app).frame
+        XCTAssertGreaterThanOrEqual(icon.width, 100, "The icon should be prominent")
+        XCTAssertEqual(icon.midX, window.midX, accuracy: 3, "The icon should be centred")
+        XCTAssertLessThan(icon.minY, window.height / 3, "The icon should be at the top of the page")
+        for prefix in ["Version", "Build"] {
+            let pill = item(startingWith: prefix, in: app).frame
+            XCTAssertTrue(window.contains(pill), "The \(prefix) pill runs off the screen: \(pill)")
+        }
+        XCTAssertTrue(item(startingWith: "Settings", in: app).isHittable, "Settings should be on screen without scrolling")
 
         XCTAssertTrue(reveal(item("Check for Updates", in: app), in: app), "The update checker is not on the Info page")
         snapshot("info-updates")
@@ -186,6 +211,7 @@ final class PwnedUITests: XCTestCase {
         let app = launch()
         openSettings(app)
         snapshot("settings-hub")
+        layoutReport("settings-hub", in: app)
 
         visitPage("Appearance", in: app, screenshot: "settings-appearance")
         visitPage("Interface & Navigation", in: app, screenshot: "settings-interface")

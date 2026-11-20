@@ -186,6 +186,14 @@ jobs:
               --path build/UITestResults.xcresult \
               --output-path build/screenshots || true
             ls -la build/screenshots | head -80
+            # Text attachments hold the on-screen element tree of each page, so the
+            # layout can be read from this log without opening the images.
+            for report in build/screenshots/*.txt; do
+              [ -e "$report" ] || continue
+              echo "::group::$(head -1 "$report")"
+              cat "$report"
+              echo "::endgroup::"
+            done
           fi
 
       - name: Upload screenshots
