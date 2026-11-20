@@ -13,6 +13,7 @@ struct RepositoryPreviewView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppRouter.self) private var router
     @Query private var bookmarks: [RepositoryBookmark]
+    @AppStorage(AppSettings.repoShowAnalysisKey) private var showsAnalysis = AppSettings.Default.repoShowAnalysis
     @State private var model: RepositoryModel
 
     init(reference: GitHubRepositoryReference) {
@@ -43,7 +44,9 @@ struct RepositoryPreviewView: View {
             case .loaded(let details):
                 metadataSection(details)
                 sourceSection
-                analysisSections
+                if showsAnalysis {
+                    analysisSections
+                }
             }
 
             BacklinksSection(kinds: [.repository], entityID: reference.fullName.lowercased())
@@ -65,7 +68,7 @@ struct RepositoryPreviewView: View {
             }
         }
         .task(id: reference) {
-            modelContext.recordView(.repository, id: reference.fullName, title: reference.fullName)
+            modelContext.noteViewed(.repository, id: reference.fullName, title: reference.fullName)
             await model.load()
         }
         .refreshable {
@@ -251,6 +254,7 @@ struct RepositoryPreviewView: View {
             for bookmark in existing { modelContext.delete(bookmark) }
         }
         modelContext.saveLoggingFailure()
+        Haptics.play(.tap)
     }
 
     private func startNote() {

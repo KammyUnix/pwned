@@ -101,9 +101,7 @@ struct NoteEditorView: View {
         }
         .navigationTitle(note.displayTitle)
         .environment(\.openURL, OpenURLAction { url in
-            guard let route = AppRoute(linkURL: url) else { return .systemAction }
-            router.push(route)
-            return .handled
+            router.handleLink(url)
         })
         .onChange(of: note.title) { note.touch() }
         .onChange(of: note.body) { note.touch() }
@@ -114,7 +112,7 @@ struct NoteEditorView: View {
         }
         .task(id: note.id) {
             modelContext.importLegacyLinks(for: note)
-            modelContext.recordView(.note, id: note.id.uuidString, title: note.displayTitle)
+            modelContext.noteViewed(.note, id: note.id.uuidString, title: note.displayTitle)
             if !didChooseMode {
                 // A new, empty note opens for writing; an existing one for reading.
                 isEditing = note.body.isEmpty
@@ -146,7 +144,11 @@ struct NoteEditorView: View {
 
                 Menu {
                     Button(role: .destructive) {
-                        confirmsDelete = true
+                        if AppSettings.bool(AppSettings.confirmNoteDeletionKey, default: AppSettings.Default.confirmNoteDeletion) {
+                            confirmsDelete = true
+                        } else {
+                            removeNote()
+                        }
                     } label: {
                         Label("Delete Note", systemImage: "trash")
                     }
@@ -160,10 +162,7 @@ struct NoteEditorView: View {
         }
         .confirmationDialog("Delete this note?", isPresented: $confirmsDelete, titleVisibility: .visible) {
             Button("Delete Note", role: .destructive) {
-                modelContext.deleteReferences(forNote: note.id)
-                modelContext.delete(note)
-                modelContext.saveLoggingFailure()
-                dismiss()
+                removeNote()
             }
         } message: {
             Text("This can't be undone.")
@@ -324,6 +323,14 @@ struct NoteEditorView: View {
                 Label("Remove Link", systemImage: "link.badge.minus")
             }
         }
+    }
+
+    private func removeNote() {
+        modelContext.deleteReferences(forNote: note.id)
+        modelContext.delete(note)
+        modelContext.saveLoggingFailure()
+        Haptics.play(.warning)
+        dismiss()
     }
 
     /// Topics related to the note's linked topics that the note doesn't link

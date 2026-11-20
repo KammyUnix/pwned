@@ -5,6 +5,14 @@ extension Date {
     var shortDateLabel: String {
         formatted(date: .abbreviated, time: .omitted)
     }
+
+    /// The date as an absolute date or as time passed ("3 days ago"), as the user prefers.
+    func label(style: DateStyle) -> String {
+        switch style {
+        case .absolute: shortDateLabel
+        case .relative: formatted(.relative(presentation: .numeric, unitsStyle: .wide))
+        }
+    }
 }
 
 extension DataSourceState {

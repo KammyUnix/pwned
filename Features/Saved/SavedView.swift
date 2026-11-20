@@ -24,8 +24,13 @@ struct SavedView: View {
     @Query(sort: \RepositoryBookmark.createdAt, order: .reverse) private var repositoryBookmarks: [RepositoryBookmark]
     @Query(sort: \ViewedItem.viewedAt, order: .reverse) private var viewedItems: [ViewedItem]
 
+    @AppStorage(AppSettings.confirmNoteDeletionKey) private var confirmsNoteDeletion = AppSettings.Default.confirmNoteDeletion
+    @AppStorage(AppSettings.recentLimitKey) private var recentLimit = AppSettings.Default.recentLimit
+    @AppStorage(AppSettings.keepRecentKey) private var keepsRecent = AppSettings.Default.keepRecent
+
     @State private var pane: Pane = .notes
     @State private var searchText = ""
+    @State private var pendingDeletion: [ResearchNote] = []
 
     var body: some View {
         @Bindable var router = router
@@ -49,6 +54,21 @@ struct SavedView: View {
                 }
             }
             .navigationTitle("Saved")
+            .confirmationDialog(
+                deletionTitle,
+                isPresented: Binding(
+                    get: { !pendingDeletion.isEmpty },
+                    set: { if !$0 { pendingDeletion = [] } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    delete(pendingDeletion)
+                    pendingDeletion = []
+                }
+            } message: {
+                Text("This can't be undone. Links to the deleted notes are removed too.")
+            }
             .searchable(text: $searchText, prompt: "Notes, CVEs, technologies, repositories")
             .toolbar {
                 if pane == .notes {
@@ -110,7 +130,12 @@ struct SavedView: View {
                     }
                 }
                 .onDelete { offsets in
-                    delete(offsets.map { items[$0] })
+                    let doomed = offsets.map { items[$0] }
+                    if confirmsNoteDeletion {
+                        pendingDeletion = doomed
+                    } else {
+                        delete(doomed)
+                    }
                 }
             }
         }
@@ -129,6 +154,11 @@ struct SavedView: View {
             modelContext.delete(note)
         }
         modelContext.saveLoggingFailure()
+        Haptics.play(.warning)
+    }
+
+    private var deletionTitle: String {
+        pendingDeletion.count == 1 ? "Delete this note?" : "Delete \(pendingDeletion.count) notes?"
     }
 
     // MARK: Bookmarks
@@ -181,13 +211,17 @@ struct SavedView: View {
                 Text("Items you open appear here.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewedItems.prefix(30)) { item in
+                ForEach(viewedItems.prefix(recentLimit)) { item in
                     if let route = item.route {
                         NavigationLink(value: route) {
                             Label(item.title, systemImage: item.systemImage)
                         }
                     }
                 }
+            }
+        } footer: {
+            if !keepsRecent {
+                Text("Recording is off. Turn on Keep Recently Viewed in Settings, under Data & Privacy.")
             }
         }
     }

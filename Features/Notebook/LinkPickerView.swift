@@ -97,6 +97,7 @@ struct LinkPickerView: View {
                 displayName: candidate.displayName,
                 origin: .manual
             )
+            Haptics.play(.tap)
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

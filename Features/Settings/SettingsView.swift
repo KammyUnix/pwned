@@ -1,139 +1,95 @@
 import SwiftUI
 
-/// The app's one settings screen, reached from the Info tab.
+/// The settings hub, reached from the Info tab. Each row opens one page, in
+/// the way the system Settings app is organised.
 ///
 /// Every preference has exactly one home:
-/// * the NVD API key and cache controls are here;
 /// * showing uncertain Apple matches is a Discover filter, so it lives in
-///   Discover's filter menu and is only described here.
+///   Discover's filter menu and is only described here;
+/// * updates are checked from the Info tab, never from here.
 ///
 /// Clearing cached data removes downloaded NVD records only. Notes, links,
 /// bookmarks and search history live in a separate store and are never touched.
 struct SettingsView: View {
-    @Environment(IntelligenceStore.self) private var store
+    @Environment(AppIconModel.self) private var appIcon
 
-    @State private var apiKeyInput = ""
-    @State private var hasStoredKey = false
-    @State private var keyError: String?
-    @State private var confirmsClear = false
-
-    private static let keyRequestURL = URL(string: "https://nvd.nist.gov/developers/request-an-api-key")
+    private let info = AppInfo()
 
     var body: some View {
-        Form {
-            sourceSection
-            appleSection
-            apiKeySection
-            cacheSection
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    AppIconView(choice: appIcon.current, size: 60)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(info.name)
+                            .font(.title3.weight(.semibold))
+                        Text(info.versionLabel)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .combine)
+            }
+
+            Section {
+                link("Appearance", systemImage: "paintpalette.fill", color: .pink) { AppearanceSettingsView() }
+                link("Interface & Navigation", systemImage: "rectangle.3.group.fill", color: .indigo) { InterfaceSettingsView() }
+                link("Accessibility", systemImage: "accessibility", color: .blue) { AccessibilitySettingsView() }
+            }
+
+            Section {
+                link("Research & Content", systemImage: "books.vertical.fill", color: .orange) { ResearchSettingsView() }
+                link("Vulnerability Data", systemImage: "arrow.down.circle.fill", color: .teal) { DataSourcesSettingsView() }
+            }
+
+            Section {
+                link("Data & Privacy", systemImage: "hand.raised.fill", color: .green) { DataPrivacySettingsView() }
+                link("General", systemImage: "gearshape.fill", color: .gray) { GeneralSettingsView() }
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            hasStoredKey = NVDAPIKeyStore.hasKey
-            await store.updateCacheStatistics()
-        }
-        .confirmationDialog("Clear cached data?", isPresented: $confirmsClear, titleVisibility: .visible) {
-            Button("Clear Cached Data", role: .destructive) {
-                Task { await store.clearCachedData() }
-            }
-        } message: {
-            Text("Downloaded vulnerability records are removed from this device. Your notes, links, bookmarks and search history are kept. Nothing is shown in their place until you refresh.")
-        }
     }
 
-    // MARK: Sections
-
-    private var sourceSection: some View {
-        Section {
-            LabeledContent("Source", value: "NVD CVE API 2.0")
-            LabeledContent("Rate Limit", value: hasStoredKey ? "50 requests / 30 s" : "5 requests / 30 s")
-        } header: {
-            Text("Vulnerability Data")
-        } footer: {
-            Text(store.vulnerabilityState.summary)
-        }
-    }
-
-    private var appleSection: some View {
-        let otherCount = max(store.vulnerabilities.count - store.appleFeed.count - store.candidates.count, 0)
-        return Section {
-            LabeledContent("Apple Records", value: store.appleFeed.count.formatted())
-            LabeledContent("Needs Review", value: store.candidates.count.formatted())
-            LabeledContent("Other Saved Records", value: otherCount.formatted())
-        } header: {
-            Text("Apple Research Feed")
-        } footer: {
-            Text("Discover lists records NVD or Apple's security team tie to an Apple product. Records with weaker evidence are kept for review, and everything else stays saved but out of the feed. Include uncertain matches from the filter menu in Discover.")
-        }
-    }
-
-    private var apiKeySection: some View {
-        Section {
-            if hasStoredKey {
-                LabeledContent("API Key", value: "Saved in Keychain")
-                Button("Remove API Key", role: .destructive, action: removeKey)
-            } else {
-                SecureField("Paste NVD API key", text: $apiKeyInput)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("Save API Key", action: saveKey)
-                    .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            if let keyError {
-                Label(keyError, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            Text("NVD API Key (Optional)")
-        } footer: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Pwned works without a key. NVD allows 5 requests per 30 seconds without one and 50 with a free key. The key is stored in this device's Keychain and is only sent to NVD.")
-                if let url = Self.keyRequestURL {
-                    Link("Request a free key from NVD", destination: url)
-                }
+    private func link<Destination: View>(
+        _ title: String,
+        systemImage: String,
+        color: Color,
+        @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            Label {
+                Text(title)
+            } icon: {
+                SettingsTile(systemImage: systemImage, color: color)
             }
         }
     }
+}
 
-    private var cacheSection: some View {
-        Section {
-            LabeledContent("Cached Records", value: store.cacheRecordCount.formatted())
-            LabeledContent("Size on Disk") {
-                Text(store.cacheSizeBytes, format: .byteCount(style: .file))
-            }
-            Button("Clear Cached Data", role: .destructive) {
-                confirmsClear = true
-            }
-        } header: {
-            Text("Cache")
-        } footer: {
-            Text("Clearing removes vulnerability records downloaded from NVD. Notes, links, bookmarks and search history are not affected.")
-        }
+/// The small colored square beside a settings row, as in the system Settings app.
+struct SettingsTile: View {
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 29, height: 29)
+            .background(color.gradient, in: RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+            .accessibilityHidden(true)
     }
+}
 
-    // MARK: Actions
-
-    private func saveKey() {
-        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return }
-        do {
-            try NVDAPIKeyStore.save(key)
-            apiKeyInput = ""
-            hasStoredKey = true
-            keyError = nil
-        } catch {
-            keyError = error.localizedDescription
-        }
+#Preview {
+    NavigationStack {
+        SettingsView()
     }
-
-    private func removeKey() {
-        do {
-            try NVDAPIKeyStore.remove()
-            hasStoredKey = false
-            keyError = nil
-        } catch {
-            keyError = error.localizedDescription
-        }
-    }
+    .environment(IntelligenceStore())
+    .environment(AppIconModel())
+    .modelContainer(PersistenceController.makeInMemoryContainer())
 }

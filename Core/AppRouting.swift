@@ -6,7 +6,7 @@ import Observation
 /// Search lives inside Discover, and everything else (repositories, the
 /// laboratory, settings) is pushed onto one of these three stacks, so the tab
 /// bar never grows.
-enum AppTab: Hashable, CaseIterable {
+enum AppTab: String, Hashable, CaseIterable {
     case discover
     case saved
     case info
@@ -49,7 +49,15 @@ enum AppRoute: Hashable {
 @MainActor
 @Observable
 final class AppRouter {
-    var selectedTab: AppTab = .discover
+    var selectedTab: AppTab
+
+    /// A web page shown in an in-app browser sheet, when the user prefers that
+    /// to leaving the app.
+    var presentedWebPage: WebPage?
+
+    init(selectedTab: AppTab = .discover) {
+        self.selectedTab = selectedTab
+    }
 
     var discoverPath = NavigationPath()
     var savedPath = NavigationPath()
@@ -80,6 +88,20 @@ final class AppRouter {
         }
     }
 
+    /// Decides what happens when a link is tapped. Web links open in the
+    /// in-app browser when that preference is on; everything else goes to the system.
+    func handleLink(_ url: URL, opensInApp: Bool = AppSettings.opensLinksInApp()) -> OpenURLAction.Result {
+        if let route = AppRoute(linkURL: url) {
+            push(route)
+            return .handled
+        }
+        guard opensInApp, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return .systemAction
+        }
+        presentedWebPage = WebPage(url: url)
+        return .handled
+    }
+
     /// Pushes a route onto the stack of the tab the user is looking at, so
     /// following a link from a note keeps "Back" returning to the note.
     func push(_ route: AppRoute) {
@@ -89,4 +111,10 @@ final class AppRouter {
         case .info: infoPath.append(route)
         }
     }
+}
+
+/// A web page to show in the in-app browser.
+struct WebPage: Identifiable, Equatable {
+    let url: URL
+    var id: URL { url }
 }

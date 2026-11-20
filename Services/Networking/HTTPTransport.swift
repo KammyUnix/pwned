@@ -32,6 +32,9 @@ struct URLSessionTransport: HTTPTransport {
     }
 
     func send(_ request: URLRequest) async throws -> HTTPResult {
+        // "Use Cellular Data" in Settings applies to every request Pwned makes.
+        var request = request
+        request.allowsCellularAccess = AppSettings.allowsCellular()
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {

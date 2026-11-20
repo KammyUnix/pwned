@@ -72,6 +72,8 @@ struct RepositoryFileView: View {
     let reference: GitHubRepositoryReference
     let entry: GitHubTreeEntry
 
+    @AppStorage(AppSettings.repoWrapLinesKey) private var wrapsLines = AppSettings.Default.repoWrapLines
+    @AppStorage(AppSettings.repoCodeSizeKey) private var codeSize = AppSettings.Default.repoCodeSize
     @State private var state: Loadable<GitHubFile> = .idle
 
     var body: some View {
@@ -110,7 +112,7 @@ struct RepositoryFileView: View {
     @ViewBuilder
     private func content(for file: GitHubFile) -> some View {
         if let text = file.text {
-            ScrollView {
+            ScrollView(wrapsLines ? [.vertical] : [.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 8) {
                     if file.byteCount > GitHubClient.maxDisplayBytes {
                         Label("Showing the first \(ByteCountFormatter.string(fromByteCount: Int64(GitHubClient.maxDisplayBytes), countStyle: .file)) of this file.",
@@ -119,9 +121,10 @@ struct RepositoryFileView: View {
                             .foregroundStyle(.secondary)
                     }
                     Text(text.isEmpty ? "This file is empty." : text)
-                        .font(.system(.footnote, design: .monospaced))
+                        .font(codeSize.font)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: !wrapsLines, vertical: false)
+                        .frame(maxWidth: wrapsLines ? .infinity : nil, alignment: .leading)
                 }
                 .padding()
             }

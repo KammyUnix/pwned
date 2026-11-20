@@ -82,8 +82,8 @@ final class IntelligenceStore {
     @ObservationIgnored private var hasStarted = false
 
     /// NVD asks clients not to poll aggressively, so an automatic refresh only
-    /// happens when the data is older than this. Pull to refresh overrides it.
-    private static let staleInterval: TimeInterval = 2 * 60 * 60
+    /// happens when the data is older than the interval chosen in Settings
+    /// (two hours by default). Pull to refresh overrides it.
     /// Apple publishes security content in bursts weeks apart, so the feed
     /// window is a month rather than a day.
     private static let windowLength: TimeInterval = 30 * 24 * 60 * 60
@@ -166,10 +166,20 @@ final class IntelligenceStore {
 
     func refreshIfStale() async {
         guard service != nil else { return }
-        if let lastRefreshed, Date().timeIntervalSince(lastRefreshed) < Self.staleInterval {
-            return
-        }
+        guard Self.shouldRefresh(lastRefreshed: lastRefreshed) else { return }
         await refresh()
+    }
+
+    /// Whether an automatic refresh is due. Off in Settings means never; pull
+    /// to refresh still works. Otherwise data must be older than the chosen interval.
+    static func shouldRefresh(
+        lastRefreshed: Date?,
+        now: Date = Date(),
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard AppSettings.autoRefreshEnabled(in: defaults) else { return false }
+        guard let lastRefreshed else { return true }
+        return now.timeIntervalSince(lastRefreshed) >= AppSettings.refreshInterval(in: defaults)
     }
 
     // MARK: Feed

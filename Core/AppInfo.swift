@@ -11,6 +11,19 @@ struct AppInfo: Equatable, Sendable {
     /// Shown when the bundle doesn't carry a value, rather than a made-up one.
     static let unavailable = "Unavailable"
 
+    /// What the app is, in one sentence. Shown on the Info page.
+    static let summary = "Apple security research on your iPhone: public vulnerability data, linked notes and a few small lab tools."
+
+    /// The developer's GitHub account.
+    static let developerName = "KammyUnix"
+    static let developerURL = URL(string: "https://github.com/KammyUnix")!
+
+    /// The source repository, which is also where releases are published.
+    static let repository = GitHubRepositoryReference(owner: "KammyUnix", name: "pwned")
+    static var repositoryURL: URL { repository.webURL }
+    static var issuesURL: URL { repository.webURL.appendingPathComponent("issues") }
+    static var releasesURL: URL { repository.webURL.appendingPathComponent("releases") }
+
     let name: String
     let version: String
     let build: String

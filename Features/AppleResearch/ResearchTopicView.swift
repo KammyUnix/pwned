@@ -24,7 +24,7 @@ struct ResearchTopicView: View {
                 content(for: topic)
                     .navigationTitle(topic.name)
                     .task(id: topicID) {
-                        modelContext.recordView(.researchTopic, id: topic.id, title: topic.name)
+                        modelContext.noteViewed(.researchTopic, id: topic.id, title: topic.name)
                     }
             } else {
                 ContentUnavailableView(

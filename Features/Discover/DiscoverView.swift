@@ -16,12 +16,27 @@ struct DiscoverView: View {
     @Query private var bookmarks: [VulnerabilityBookmark]
     @Query(sort: \ResearchNote.modifiedAt, order: .reverse) private var notes: [ResearchNote]
     @Query private var references: [NoteReference]
+    @Query(sort: \SearchHistoryEntry.searchedAt, order: .reverse) private var searchHistory: [SearchHistoryEntry]
 
     @AppStorage(AppSettings.includeUncertainKey) private var includeUncertain = false
+    @AppStorage(AppSettings.defaultSortKey) private var defaultSortRaw = AppSettings.Default.defaultSort.rawValue
+    @AppStorage(AppSettings.defaultSeverityKey) private var defaultSeverityRaw = AppSettings.Default.defaultSeverity.rawValue
+    @AppStorage(AppSettings.defaultExploitedKey) private var defaultExploited = AppSettings.Default.defaultExploited
+    @AppStorage(AppSettings.defaultPlatformsKey) private var defaultPlatformsRaw = AppSettings.Default.defaultPlatforms
 
     @State private var searchText = ""
     @State private var bookmarkedOnly = false
-    @State private var filter = VulnerabilityFilter()
+    @State private var filter = FilterPreferences.read().filter
+
+    /// The filter Discover returns to: the one chosen under Research in Settings.
+    private var defaultFilter: VulnerabilityFilter {
+        FilterPreferences(
+            sortRaw: defaultSortRaw,
+            severityRaw: defaultSeverityRaw,
+            knownExploitedOnly: defaultExploited,
+            platformsRaw: defaultPlatformsRaw
+        ).filter
+    }
 
     var body: some View {
         @Bindable var router = router
@@ -36,9 +51,24 @@ struct DiscoverView: View {
             }
             .navigationTitle("Discover")
             .searchable(text: $searchText, prompt: "CVEs, Apple components, repositories, notes")
+            .searchSuggestions {
+                if trimmedSearch.isEmpty {
+                    ForEach(searchHistory.prefix(8)) { entry in
+                        Text(entry.query).searchCompletion(entry.query)
+                    }
+                }
+            }
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            .refreshable { await store.refresh() }
+            .refreshable {
+                await store.refresh()
+                if case .failed = store.refreshPhase { return }
+                Haptics.play(.success)
+            }
+            .onChange(of: defaultFilter) { _, newDefault in
+                // Changing the defaults in Settings takes effect right away.
+                filter = newDefault
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     filterMenu
@@ -180,7 +210,7 @@ struct DiscoverView: View {
                 } description: {
                     Text("No Apple records match the current filters.")
                 } actions: {
-                    Button("Reset Filters") { filter = VulnerabilityFilter() }
+                    Button("Reset Filters") { filter = defaultFilter }
                 }
             } else if !connectivity.isOnline {
                 ContentUnavailableView(
@@ -259,7 +289,7 @@ struct DiscoverView: View {
                 Section(category.title) {
                     ForEach(items) { result in
                         Button {
-                            modelContext.recordSearch(term)
+                            modelContext.noteSearched(term)
                             router.open(result.target)
                         } label: {
                             SearchResultRow(result: result)
@@ -401,9 +431,9 @@ struct DiscoverView: View {
             Toggle("Bookmarked Only", isOn: $bookmarkedOnly)
             Toggle("Include Uncertain Matches", isOn: $includeUncertain)
 
-            if filter.isActive || bookmarkedOnly {
+            if filter != defaultFilter || bookmarkedOnly {
                 Button("Reset Filters", role: .destructive) {
-                    filter = VulnerabilityFilter()
+                    filter = defaultFilter
                     bookmarkedOnly = false
                 }
             }
