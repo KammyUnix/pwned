@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Drives the real app in the iOS Simulator: the Info page, the update checker,
@@ -26,6 +27,35 @@ final class PwnedUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// How bright the screen is, from 0 (black) to 1 (white), averaged over a
+    /// downscaled screenshot. Used to see that a dark or light theme was applied.
+    private func screenBrightness() -> Double {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return -1 }
+        let side = 16
+        var pixels = [UInt8](repeating: 0, count: side * side)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) else { return false }
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard drawn else { return -1 }
+        return Double(pixels.reduce(0) { $0 + Int($1) }) / Double(pixels.count * 255)
+    }
+
+    /// Waits up to five seconds for the screen brightness to satisfy `condition`.
+    private func waitForBrightness(_ condition: (Double) -> Bool) -> Double {
+        var value = screenBrightness()
+        for _ in 0..<10 where !condition(value) {
+            Thread.sleep(forTimeInterval: 0.5)
+            value = screenBrightness()
+        }
+        return value
     }
 
     /// Saves the on-screen element tree, with every frame, as a text attachment.
@@ -263,6 +293,8 @@ final class PwnedUITests: XCTestCase {
         let dark = app.segmentedControls.buttons["Dark"]
         XCTAssertTrue(dark.waitForExistence(timeout: 5))
         dark.tap()
+        let darkBrightness = waitForBrightness { $0 < 0.4 }
+        XCTAssertLessThan(darkBrightness, 0.4, "The Dark theme was chosen but the screen is not dark")
         let indigo = item("Indigo", in: app)
         XCTAssertTrue(reveal(indigo, in: app), "The Indigo swatch is missing")
         indigo.tap()
@@ -273,8 +305,15 @@ final class PwnedUITests: XCTestCase {
         openPage("Accessibility", in: app)
         let stepper = app.steppers.firstMatch
         XCTAssertTrue(stepper.waitForExistence(timeout: 5))
+        // The explanation under the setting is several lines long, so its height shows the text size.
+        let explanation = item(startingWith: "Text Size moves", in: app)
+        XCTAssertTrue(explanation.waitForExistence(timeout: 5))
+        let heightBefore = explanation.frame.height
         stepper.buttons["Increment"].tap()
         stepper.buttons["Increment"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        let heightAfter = item(startingWith: "Text Size moves", in: app).frame.height
+        XCTAssertGreaterThan(heightAfter, heightBefore, "Two steps up in Text Size did not make the text larger")
         snapshot("custom-text-size")
         goBack(app)
 
@@ -290,8 +329,15 @@ final class PwnedUITests: XCTestCase {
         XCTAssertTrue(item("Reset all settings?", in: app).waitForExistence(timeout: 5),
                       "No confirmation before resetting")
         snapshot("reset-confirmation")
-        // The confirmation button is the last one with this name.
-        app.buttons.matching(identifier: "Reset All Settings").allElementsBoundByIndex.last?.tap()
+        layoutReport("reset-confirmation", in: app)
+        // The button behind the dialog has the same name but is covered, so tap the one that can be hit.
+        let confirmations = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Reset All Settings"))
+            .allElementsBoundByIndex
+        guard let confirm = confirmations.last(where: { $0.exists && $0.isHittable }) else {
+            return XCTFail("The confirmation button for Reset All Settings was not found")
+        }
+        confirm.tap()
 
         // The theme control is back on System after a reset.
         goBack(app)
@@ -299,6 +345,8 @@ final class PwnedUITests: XCTestCase {
         let system = app.segmentedControls.buttons["System"]
         XCTAssertTrue(system.waitForExistence(timeout: 5))
         XCTAssertTrue(system.isSelected, "Reset did not restore the System theme")
+        let lightBrightness = waitForBrightness { $0 > 0.6 }
+        XCTAssertGreaterThan(lightBrightness, 0.6, "After the reset the screen should follow the system (light) again")
         snapshot("after-reset")
     }
 
