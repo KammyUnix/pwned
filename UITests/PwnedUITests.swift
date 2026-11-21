@@ -51,14 +51,30 @@ final class PwnedUITests: XCTestCase {
             .firstMatch
     }
 
-    /// Scrolls up the list until the element exists and can be tapped.
+    /// True when the element is inside the visible part of the screen, between the
+    /// navigation bar and the tab bar. Unlike `isHittable`, this never reports a
+    /// failure for rows that a lazy list has not scrolled into view yet.
+    private func isVisible(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame
+        guard !frame.isEmpty else { return false }
+        let window = app.windows.firstMatch.frame
+        let navigation = app.navigationBars.firstMatch
+        let top = navigation.exists ? navigation.frame.maxY : window.minY
+        let tabs = app.tabBars.firstMatch
+        let bottom = tabs.exists ? tabs.frame.minY : window.maxY
+        return frame.midY > top + 4 && frame.midY < bottom - 4 && frame.midX > window.minX && frame.midX < window.maxX
+    }
+
+    /// Scrolls up the list until the element is visible.
     @discardableResult
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, attempts: Int = 8) -> Bool {
+        let list = app.collectionViews.firstMatch
         for _ in 0..<attempts {
-            if element.exists && element.isHittable { return true }
-            app.swipeUp()
+            if isVisible(element, in: app) { return true }
+            (list.exists ? list : app).swipeUp()
         }
-        return element.exists && element.isHittable
+        return isVisible(element, in: app)
     }
 
     /// Flips a switch by tapping its right-hand end, where the control is.
@@ -142,18 +158,24 @@ final class PwnedUITests: XCTestCase {
         snapshot("info-top")
         layoutReport("info-top", in: app)
 
-        // Layout: the icon is large, centred and at the top; the pills fit on screen;
-        // Settings is reachable without scrolling.
+        // The app fills the screen. Without a launch screen iOS letterboxes it in a
+        // 2:3 window with empty bars above and below.
         let window = app.windows.firstMatch.frame
+        XCTAssertEqual(window.minY, 0, accuracy: 1, "The app is letterboxed: \(window)")
+        XCTAssertGreaterThan(window.height / window.width, 1.7, "The app is not using the full screen: \(window)")
+
+        // Layout: the icon is large, centred and in the upper part of the page; the
+        // pills fit on screen; Settings is reachable without scrolling.
         let icon = item(startingWith: "Pwned app icon", in: app).frame
         XCTAssertGreaterThanOrEqual(icon.width, 100, "The icon should be prominent")
         XCTAssertEqual(icon.midX, window.midX, accuracy: 3, "The icon should be centred")
-        XCTAssertLessThan(icon.minY, window.height / 3, "The icon should be at the top of the page")
+        XCTAssertLessThan(icon.minY - window.minY, window.height * 0.3, "The icon should be at the top of the page")
         for prefix in ["Version", "Build"] {
             let pill = item(startingWith: prefix, in: app).frame
             XCTAssertTrue(window.contains(pill), "The \(prefix) pill runs off the screen: \(pill)")
         }
-        XCTAssertTrue(item(startingWith: "Settings", in: app).isHittable, "Settings should be on screen without scrolling")
+        XCTAssertTrue(isVisible(item(startingWith: "Settings", in: app), in: app),
+                      "Settings should be on screen without scrolling")
 
         XCTAssertTrue(reveal(item("Check for Updates", in: app), in: app), "The update checker is not on the Info page")
         snapshot("info-updates")

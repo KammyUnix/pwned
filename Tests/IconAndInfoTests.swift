@@ -45,6 +45,11 @@ final class AppIconTests: XCTestCase {
         XCTAssertEqual(declared, expected)
     }
 
+    func testBuiltAppHasALaunchScreenSoItFillsTheScreen() {
+        // A missing UILaunchScreen entry makes iOS letterbox the app in a 2:3 window.
+        XCTAssertNotNil(appBundle.infoDictionary?["UILaunchScreen"], "The app has no launch screen, so it would not fill the screen")
+    }
+
     func testTheLogoIsSquareAndLargeEnoughForTheInfoPage() throws {
         let image = try XCTUnwrap(UIImage(named: AppIconChoice.slate.logoName, in: appBundle, compatibleWith: nil))
         XCTAssertEqual(image.size.width, image.size.height)

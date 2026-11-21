@@ -13,6 +13,9 @@ settings:
     TARGETED_DEVICE_FAMILY: "1,2"
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: Pwned
+    # Without a launch screen, iOS runs the app letterboxed in a small 2:3 window
+    # with empty bars above and below. This key makes it use the whole screen.
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
     # The Info tab reads these back from the bundle, so this is the one place
     # the version and build are set.
     MARKETING_VERSION: "0.4.0"
